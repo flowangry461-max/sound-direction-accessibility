@@ -1,0 +1,74 @@
+name: Build and release APK (create Release with tag)
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to use for the release (will be created if missing)'
+        required: true
+        default: 'apk'
+      release_name:
+        description: 'Release name'
+        required: false
+        default: 'APK Release'
+      release_body:
+        description: 'Release notes/body'
+        required: false
+        default: 'Automated test APK release'
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Android SDK commandline tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wget unzip
+          mkdir -p $HOME/android-sdk/cmdline-tools
+          cd $HOME/android-sdk/cmdline-tools
+          wget https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip -O cmdline-tools.zip
+          unzip cmdline-tools.zip -d .
+          mv cmdline-tools latest
+          export ANDROID_SDK_ROOT=$HOME/android-sdk
+          yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --sdk_root=$ANDROID_SDK_ROOT "platform-tools" "platforms;android-33" "build-tools;33.0.2"
+        env:
+          ANDROID_SDK_ROOT: ${{ runner.temp }}/android-sdk
+
+      - name: Add SDK tools to PATH
+        run: |
+          echo "ANDROID_SDK_ROOT=$HOME/android-sdk" >> $GITHUB_ENV
+          echo "$HOME/android-sdk/platform-tools" >> $GITHUB_PATH
+          echo "$HOME/android-sdk/cmdline-tools/latest/bin" >> $GITHUB_PATH
+
+      - name: Install Gradle
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gradle
+
+      - name: Generate Gradle wrapper
+        run: |
+          gradle wrapper
+
+      - name: Build debug APK
+        run: |
+          chmod +x ./gradlew
+          ./gradlew assembleDebug --no-daemon
+        env:
+          JAVA_HOME: ${{ steps.setup-java.outputs.java-home }}
+
+      - name: Create GitHub Release and upload APK
+        uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ github.event.inputs.tag }}
+          name: ${{ github.event.inputs.release_name }}
+          body: ${{ github.event.inputs.release_body }}
+          files: app/build/outputs/apk/debug/app-debug.apk
